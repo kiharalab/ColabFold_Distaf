@@ -419,9 +419,9 @@ def predict_structure(
             result, recycles = \
             model_runner.predict(input_features,
                 random_seed=seed,
-                return_representations=return_representations,
+                return_representations=True,
                 callback=callback)
-
+            return result, recycles
             prediction_times.append(time.time() - start)
 
             ########################
@@ -1566,7 +1566,7 @@ def run(
                     )
                     first_job = False
 
-                results = predict_structure(
+                results,_ = predict_structure(
                     prefix=jobname,
                     result_dir=result_dir,
                     feature_dict=feature_dict,
@@ -1592,11 +1592,12 @@ def run(
                     save_pair_representations=save_pair_representations,
                     save_recycles=save_recycles,
                 )
+                print(results['representations']['single'].shape)
+                print(results['representations']['pair'].shape)
                 result_files += results["result_files"]
                 ranks.append(results["rank"])
                 metrics.append(results["metric"])
-                for key in results.keys():
-                    print(key)
+                
 
             except RuntimeError as e:
                 # This normally happens on OOM. TODO: Filter for the specific OOM error message
