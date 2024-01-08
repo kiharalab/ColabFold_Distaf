@@ -30,7 +30,7 @@ import numpy as np
 import pandas
 
 try:
-    import alphafold.alphafold
+    import alphafold.alphafold as alphafold
 except ModuleNotFoundError:
     raise RuntimeError(
         "\n\nalphafold is not installed. Please run `pip install colabfold[alphafold]`\n"
