@@ -12,7 +12,7 @@ authors = [
 ]
 readme = "README.md"
 license = "MIT, but separate licenses for the trained weights"
-repository = "https://github.com/sokrypton/ColabFold"
+repository = "https://github.com/kiharalab/ColabFold_Distaf"
 classifiers = [
     "Topic :: Scientific/Engineering :: Bio-Informatics",
     "Topic :: Scientific/Engineering :: Artificial Intelligence"
