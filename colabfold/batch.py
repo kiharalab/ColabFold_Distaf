@@ -30,7 +30,7 @@ import numpy as np
 import pandas
 
 try:
-    import alphafold.alphafold as alphafold
+    import alphafold.alphafold
 except ModuleNotFoundError:
     raise RuntimeError(
         "\n\nalphafold is not installed. Please run `pip install colabfold[alphafold]`\n"
@@ -1595,6 +1595,8 @@ def run(
                 result_files += results["result_files"]
                 ranks.append(results["rank"])
                 metrics.append(results["metric"])
+                for key in results.keys():
+                    print(key)
 
             except RuntimeError as e:
                 # This normally happens on OOM. TODO: Filter for the specific OOM error message
