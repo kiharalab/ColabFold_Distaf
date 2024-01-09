@@ -1544,10 +1544,10 @@ def run(
                         logger.info(f"Setting max_seq={max_seq}, max_extra_seq={max_extra_seq}")
                 from alphafold.model import config
                 from alphafold.model import data
-                import tqdm        
+                import tqdm.notebook      
                 model_names = config.MODEL_PRESETS['monomer']
                 os.makedirs(result_dir, exist_ok=True)
-                with tqdm.notebook.tqdm(total=len(model_names)) as pbar:
+                with tqdm.notebook.tqdm(total=len(model_names), bar_format=TQDM_BAR_FORMAT) as pbar:
                     for model_name in model_names:
                         pbar.set_description(f'Running {model_name}')
 
