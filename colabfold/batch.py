@@ -1557,12 +1557,12 @@ def run(
                         cfg.data.eval.num_ensemble = 1
                         params = data.get_model_haiku_params(model_name, './alphafold/data')
                         model_runner = model.RunModel(cfg, params)
-                        processed_feature_dict = model_runner.process_feature(feature_dict, random_seed=0)
+                        processed_feature_dict = model_runner.process_features(feature_dict, random_seed=0)
                         prediction = model_runner.predict(processed_feature_dict, random_seed=random.randrange(sys.maxsize))
                         representation = prediction['representations']
                         output_dir_model = os.path.join(result_dir, f'{model_name}.npz')
                         np.savez(output_dir_model, single=representation['single'],
-                                                    pair=representation['pair'])
+                                  pair=representation['pair'])
                 return
                 #     model_runner_and_params = load_models_and_params(
                 #         num_models=num_models,
