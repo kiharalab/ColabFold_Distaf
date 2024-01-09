@@ -414,9 +414,10 @@ def predict_structure(
                     del unrelaxed_protein
 
             return_representations = save_all or save_single_representations or save_pair_representations
-
+            processed_feature_dict = model_runner.process_features(
+                feature_dict, random_seed=seed)
             # predict
-            result= model_runner.predict(feature_dict,
+            result= model_runner.predict(processed_feature_dict,
                 random_seed=seed)
             return result
             prediction_times.append(time.time() - start)
