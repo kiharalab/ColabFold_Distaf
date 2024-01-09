@@ -1544,6 +1544,7 @@ def run(
                         logger.info(f"Setting max_seq={max_seq}, max_extra_seq={max_extra_seq}")
                 from alphafold.model import config
                 from alphafold.model import data
+                from alphafold.model import model
                 import tqdm.notebook      
                 TQDM_BAR_FORMAT = '{l_bar}{bar}| {n_fmt}/{total_fmt} [elapsed: {elapsed} remaining: {remaining}]'
                 model_names = config.MODEL_PRESETS['monomer']
