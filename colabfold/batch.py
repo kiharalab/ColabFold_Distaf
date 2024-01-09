@@ -1512,167 +1512,200 @@ def run(
         ######################
         # predict structures
         ######################
-        if num_models > 0:
-            try:
-                # get list of lengths
-                query_sequence_len_array = sum([[len(x)] * y
-                    for x,y in zip(query_seqs_unique, query_seqs_cardinality)],[])
+        try:
+            # get list of lengths
+            query_sequence_len_array = sum([[len(x)] * y
+                for x,y in zip(query_seqs_unique, query_seqs_cardinality)],[])
 
-                # decide how much to pad (to avoid recompiling)
-                if seq_len > pad_len:
-                    if isinstance(recompile_padding, float):
-                        pad_len = math.ceil(seq_len * recompile_padding)
+            # decide how much to pad (to avoid recompiling)
+            if seq_len > pad_len:
+                if isinstance(recompile_padding, float):
+                    pad_len = math.ceil(seq_len * recompile_padding)
+                else:
+                    pad_len = seq_len + recompile_padding
+                pad_len = min(pad_len, max_len)
+
+            # prep model and params
+            if first_job:
+                # if one job input adjust max settings
+                if len(queries) == 1 and msa_mode != "single_sequence":
+                    # get number of sequences
+                    if "msa_mask" in feature_dict:
+                        num_seqs = int(sum(feature_dict["msa_mask"].max(-1) == 1))
                     else:
-                        pad_len = seq_len + recompile_padding
-                    pad_len = min(pad_len, max_len)
+                        num_seqs = int(len(feature_dict["msa"]))
 
-                # prep model and params
-                if first_job:
-                    # if one job input adjust max settings
-                    if len(queries) == 1 and msa_mode != "single_sequence":
-                        # get number of sequences
-                        if "msa_mask" in feature_dict:
-                            num_seqs = int(sum(feature_dict["msa_mask"].max(-1) == 1))
-                        else:
-                            num_seqs = int(len(feature_dict["msa"]))
+                    if use_templates: num_seqs += 4
 
-                        if use_templates: num_seqs += 4
+                    # adjust max settings
+                    max_seq = min(num_seqs, max_seq)
+                    max_extra_seq = max(min(num_seqs - max_seq, max_extra_seq), 1)
+                    logger.info(f"Setting max_seq={max_seq}, max_extra_seq={max_extra_seq}")
+            from alphafold.model import config
+            from alphafold.model import data
+            from alphafold.model import model
+            from alphafold.common import protein
+            from alphafold.relax import utils
+            import tqdm.notebook      
+            TQDM_BAR_FORMAT = '{l_bar}{bar}| {n_fmt}/{total_fmt} [elapsed: {elapsed} remaining: {remaining}]'
+            PLDDT_BANDS = [(0, 50, '#FF7D45'),
+                            (50, 70, '#FFDB13'),
+                            (70, 90, '#65CBF3'),
+                            (90, 100, '#0053D6')]
+            model_names = config.MODEL_PRESETS['monomer']
+            os.makedirs(result_dir, exist_ok=True)
+            # with tqdm.notebook.tqdm(total=len(model_names), bar_format=TQDM_BAR_FORMAT) as pbar:
+            for model_name in model_names:
+                # pbar.set_description(f'Running {model_name}')
 
-                        # adjust max settings
-                        max_seq = min(num_seqs, max_seq)
-                        max_extra_seq = max(min(num_seqs - max_seq, max_extra_seq), 1)
-                        logger.info(f"Setting max_seq={max_seq}, max_extra_seq={max_extra_seq}")
-                from alphafold.model import config
-                from alphafold.model import data
-                from alphafold.model import model
-                import tqdm.notebook      
-                TQDM_BAR_FORMAT = '{l_bar}{bar}| {n_fmt}/{total_fmt} [elapsed: {elapsed} remaining: {remaining}]'
-                model_names = config.MODEL_PRESETS['monomer']
-                os.makedirs(result_dir, exist_ok=True)
-                with tqdm.notebook.tqdm(total=len(model_names), bar_format=TQDM_BAR_FORMAT) as pbar:
-                    for model_name in model_names:
-                        pbar.set_description(f'Running {model_name}')
+                cfg = config.model_config(model_name)
+                cfg.data.eval.num_ensemble = 1
+                params = data.get_model_haiku_params(model_name, './alphafold/data')
+                model_runner = model.RunModel(cfg, params)
+                processed_feature_dict = model_runner.process_features(feature_dict, random_seed=0)
+                prediction = model_runner.predict(processed_feature_dict, random_seed=random.randrange(sys.maxsize))
+                representation = prediction['representations']
+                output_dir_model = os.path.join(result_dir, f'{model_name}.npz')
+                np.savez(output_dir_model, single=representation['single'],
+                            pair=representation['pair'])
+                # mean_plddt = prediction['plddt'].mean()
+                # plddt_score = prediction['plddt']
+                final_atom_mask = prediction['structure_module']['final_atom_mask']
+                b_factors = prediction['plddt'][:, None] * final_atom_mask
+                unrelaxed_protein = protein.from_prediction(
+                    processed_feature_dict,
+                    prediction,
+                    b_factors=b_factors,
+                    remove_leading_feature_dimension=(
+                        True))
+                # Delete unused outputs to save memory.
+                del model_runner
+                del params
+                del prediction
+                print(f'Running {model_name} successfully!')
+                unrelaxed_pdb = protein.to_pdb(unrelaxed_protein)
+                # banded_b_factors = []
+                # for plddt in plddt_score:
+                #     for idx, (min_val, max_val, _) in enumerate(PLDDT_BANDS):
+                #         if plddt >= min_val and plddt <= max_val:
+                #             banded_b_factors.append(idx)
+                #             break
+                # banded_b_factors = np.array(banded_b_factors)[:, None] * final_atom_mask
+                # to_visualize_pdb = utils.overwrite_b_factors(unrelaxed_pdb, banded_b_factors)
+                pred_output_path = os.path.join(result_dir, f'{model_name}.pdb')
+                with open(pred_output_path, 'w') as f:
+                    f.write(unrelaxed_pdb)
+            return
+            
+            #     model_runner_and_params = load_models_and_params(
+            #         num_models=num_models,
+            #         use_templates=use_templates,
+            #         num_recycles=num_recycles,
+            #         num_ensemble=num_ensemble,
+            #         model_order=model_order,
+            #         model_type=model_type,
+            #         data_dir=data_dir,
+            #         stop_at_score=stop_at_score,
+            #         rank_by=rank_by,
+            #         use_dropout=use_dropout,
+            #         max_seq=max_seq,
+            #         max_extra_seq=max_extra_seq,
+            #         use_cluster_profile=use_cluster_profile,
+            #         recycle_early_stop_tolerance=recycle_early_stop_tolerance,
+            #         use_fuse=use_fuse,
+            #         use_bfloat16=use_bfloat16,
+            #         save_all=save_all,
+            #     )
+            #     first_job = False
 
-                        cfg = config.model_config(model_name)
-                        cfg.data.eval.num_ensemble = 1
-                        params = data.get_model_haiku_params(model_name, './alphafold/data')
-                        model_runner = model.RunModel(cfg, params)
-                        processed_feature_dict = model_runner.process_features(feature_dict, random_seed=0)
-                        prediction = model_runner.predict(processed_feature_dict, random_seed=random.randrange(sys.maxsize))
-                        representation = prediction['representations']
-                        output_dir_model = os.path.join(result_dir, f'{model_name}.npz')
-                        np.savez(output_dir_model, single=representation['single'],
-                                  pair=representation['pair'])
-                return
-                #     model_runner_and_params = load_models_and_params(
-                #         num_models=num_models,
-                #         use_templates=use_templates,
-                #         num_recycles=num_recycles,
-                #         num_ensemble=num_ensemble,
-                #         model_order=model_order,
-                #         model_type=model_type,
-                #         data_dir=data_dir,
-                #         stop_at_score=stop_at_score,
-                #         rank_by=rank_by,
-                #         use_dropout=use_dropout,
-                #         max_seq=max_seq,
-                #         max_extra_seq=max_extra_seq,
-                #         use_cluster_profile=use_cluster_profile,
-                #         recycle_early_stop_tolerance=recycle_early_stop_tolerance,
-                #         use_fuse=use_fuse,
-                #         use_bfloat16=use_bfloat16,
-                #         save_all=save_all,
-                #     )
-                #     first_job = False
+            # results = predict_structure(
+            #     prefix=jobname,
+            #     result_dir=result_dir,
+            #     feature_dict=feature_dict,
+            #     is_complex=is_complex,
+            #     use_templates=use_templates,
+            #     sequences_lengths=query_sequence_len_array,
+            #     pad_len=pad_len,
+            #     model_type=model_type,
+            #     model_runner_and_params=model_runner_and_params,
+            #     num_relax=num_relax,
+            #     relax_max_iterations=relax_max_iterations,
+            #     relax_tolerance=relax_tolerance,
+            #     relax_stiffness=relax_stiffness,
+            #     relax_max_outer_iterations=relax_max_outer_iterations,
+            #     rank_by=rank_by,
+            #     stop_at_score=stop_at_score,
+            #     prediction_callback=prediction_callback,
+            #     use_gpu_relax=use_gpu_relax,
+            #     random_seed=random_seed,
+            #     num_seeds=num_seeds,
+            #     save_all=save_all,
+            #     save_single_representations=save_single_representations,
+            #     save_pair_representations=save_pair_representations,
+            #     save_recycles=save_recycles,
+            # )
+#             print(results['representations']['single'].shape)
+#             print(results['representations']['pair'].shape)
+#             result_files += results["result_files"]
+#             ranks.append(results["rank"])
+#             metrics.append(results["metric"])
+            
 
-                # results = predict_structure(
-                #     prefix=jobname,
-                #     result_dir=result_dir,
-                #     feature_dict=feature_dict,
-                #     is_complex=is_complex,
-                #     use_templates=use_templates,
-                #     sequences_lengths=query_sequence_len_array,
-                #     pad_len=pad_len,
-                #     model_type=model_type,
-                #     model_runner_and_params=model_runner_and_params,
-                #     num_relax=num_relax,
-                #     relax_max_iterations=relax_max_iterations,
-                #     relax_tolerance=relax_tolerance,
-                #     relax_stiffness=relax_stiffness,
-                #     relax_max_outer_iterations=relax_max_outer_iterations,
-                #     rank_by=rank_by,
-                #     stop_at_score=stop_at_score,
-                #     prediction_callback=prediction_callback,
-                #     use_gpu_relax=use_gpu_relax,
-                #     random_seed=random_seed,
-                #     num_seeds=num_seeds,
-                #     save_all=save_all,
-                #     save_single_representations=save_single_representations,
-                #     save_pair_representations=save_pair_representations,
-                #     save_recycles=save_recycles,
-                # )
-                print(results['representations']['single'].shape)
-                print(results['representations']['pair'].shape)
-                result_files += results["result_files"]
-                ranks.append(results["rank"])
-                metrics.append(results["metric"])
-                
+        except RuntimeError as e:
+            # This normally happens on OOM. TODO: Filter for the specific OOM error message
+            logger.error(f"Could not predict {jobname}. Not Enough GPU memory? {e}")
+            continue
 
-            except RuntimeError as e:
-                # This normally happens on OOM. TODO: Filter for the specific OOM error message
-                logger.error(f"Could not predict {jobname}. Not Enough GPU memory? {e}")
-                continue
+    #         ###############
+    #         # save prediction plots
+    #         ###############
 
-            ###############
-            # save prediction plots
-            ###############
+    #         # load the scores
+    #         scores = []
+    #         for r in results["rank"][:5]:
+    #             scores_file = result_dir.joinpath(f"{jobname}_scores_{r}.json")
+    #             with scores_file.open("r") as handle:
+    #                 scores.append(json.load(handle))
 
-            # load the scores
-            scores = []
-            for r in results["rank"][:5]:
-                scores_file = result_dir.joinpath(f"{jobname}_scores_{r}.json")
-                with scores_file.open("r") as handle:
-                    scores.append(json.load(handle))
+    #         # write alphafold-db format (pAE)
+    #         if "pae" in scores[0]:
+    #             af_pae_file = result_dir.joinpath(f"{jobname}_predicted_aligned_error_v1.json")
+    #             af_pae_file.write_text(json.dumps({
+    #                 "predicted_aligned_error":scores[0]["pae"],
+    #                 "max_predicted_aligned_error":scores[0]["max_pae"]}))
+    #             result_files.append(af_pae_file)
 
-            # write alphafold-db format (pAE)
-            if "pae" in scores[0]:
-                af_pae_file = result_dir.joinpath(f"{jobname}_predicted_aligned_error_v1.json")
-                af_pae_file.write_text(json.dumps({
-                    "predicted_aligned_error":scores[0]["pae"],
-                    "max_predicted_aligned_error":scores[0]["max_pae"]}))
-                result_files.append(af_pae_file)
+    #             # make pAE plots
+    #             paes_plot = plot_paes([np.asarray(x["pae"]) for x in scores],
+    #                 Ls=query_sequence_len_array, dpi=dpi)
+    #             pae_png = result_dir.joinpath(f"{jobname}_pae.png")
+    #             paes_plot.savefig(str(pae_png), bbox_inches='tight')
+    #             paes_plot.close()
+    #             result_files.append(pae_png)
 
-                # make pAE plots
-                paes_plot = plot_paes([np.asarray(x["pae"]) for x in scores],
-                    Ls=query_sequence_len_array, dpi=dpi)
-                pae_png = result_dir.joinpath(f"{jobname}_pae.png")
-                paes_plot.savefig(str(pae_png), bbox_inches='tight')
-                paes_plot.close()
-                result_files.append(pae_png)
+    #         # make pLDDT plot
+    #         plddt_plot = plot_plddts([np.asarray(x["plddt"]) for x in scores],
+    #             Ls=query_sequence_len_array, dpi=dpi)
+    #         plddt_png = result_dir.joinpath(f"{jobname}_plddt.png")
+    #         plddt_plot.savefig(str(plddt_png), bbox_inches='tight')
+    #         plddt_plot.close()
+    #         result_files.append(plddt_png)
 
-            # make pLDDT plot
-            plddt_plot = plot_plddts([np.asarray(x["plddt"]) for x in scores],
-                Ls=query_sequence_len_array, dpi=dpi)
-            plddt_png = result_dir.joinpath(f"{jobname}_plddt.png")
-            plddt_plot.savefig(str(plddt_png), bbox_inches='tight')
-            plddt_plot.close()
-            result_files.append(plddt_png)
+    #     if zip_results:
+    #         with zipfile.ZipFile(result_zip, "w") as result_zip:
+    #             for file in result_files:
+    #                 result_zip.write(file, arcname=file.name)
 
-        if zip_results:
-            with zipfile.ZipFile(result_zip, "w") as result_zip:
-                for file in result_files:
-                    result_zip.write(file, arcname=file.name)
+    #         # Delete only after the zip was successful, and also not the bibtex and config because we need those again
+    #         for file in result_files:
+    #             if file != bibtex_file and file != config_out_file:
+    #                 file.unlink()
+    #     else:
+    #         if num_models > 0:
+    #             is_done_marker.touch()
 
-            # Delete only after the zip was successful, and also not the bibtex and config because we need those again
-            for file in result_files:
-                if file != bibtex_file and file != config_out_file:
-                    file.unlink()
-        else:
-            if num_models > 0:
-                is_done_marker.touch()
-
-    logger.info("Done")
-    return {"rank":ranks,"metric":metrics}
+    # logger.info("Done")
+    # return {"rank":ranks,"metric":metrics}
 
 def set_model_type(is_complex: bool, model_type: str) -> str:
     # backward-compatibility with old options
