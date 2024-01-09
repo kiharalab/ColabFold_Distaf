@@ -1497,11 +1497,11 @@ def run(
         result_files = []
 
         # make msa plot
-        msa_plot = plot_msa_v2(feature_dict, dpi=dpi)
-        coverage_png = result_dir.joinpath(f"{jobname}_coverage.png")
-        msa_plot.savefig(str(coverage_png), bbox_inches='tight')
-        msa_plot.close()
-        result_files.append(coverage_png)
+        # msa_plot = plot_msa_v2(feature_dict, dpi=dpi)
+        # coverage_png = result_dir.joinpath(f"{jobname}_coverage.png")
+        # msa_plot.savefig(str(coverage_png), bbox_inches='tight')
+        # msa_plot.close()
+        # result_files.append(coverage_png)
 
         if use_templates:
             templates_file = result_dir.joinpath(f"{jobname}_template_domain_names.json")
