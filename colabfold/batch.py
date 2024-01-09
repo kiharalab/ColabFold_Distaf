@@ -1545,6 +1545,7 @@ def run(
                 from alphafold.model import config
                 from alphafold.model import data
                 import tqdm.notebook      
+                TQDM_BAR_FORMAT = '{l_bar}{bar}| {n_fmt}/{total_fmt} [elapsed: {elapsed} remaining: {remaining}]'
                 model_names = config.MODEL_PRESETS['monomer']
                 os.makedirs(result_dir, exist_ok=True)
                 with tqdm.notebook.tqdm(total=len(model_names), bar_format=TQDM_BAR_FORMAT) as pbar:
