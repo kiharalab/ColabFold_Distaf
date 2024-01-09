@@ -1542,54 +1542,73 @@ def run(
                         max_seq = min(num_seqs, max_seq)
                         max_extra_seq = max(min(num_seqs - max_seq, max_extra_seq), 1)
                         logger.info(f"Setting max_seq={max_seq}, max_extra_seq={max_extra_seq}")
+                from alphafold.model import config
+                from alphafold.model import data
+                import tqdm        
+                model_names = config.MODEL_PRESETS['monomer']
+                os.makedirs(result_dir, exist_ok=True)
+                with tqdm.notebook.tqdm(total=len(model_names)) as pbar:
+                    for model_name in model_names:
+                        pbar.set_description(f'Running {model_name}')
 
-                    model_runner_and_params = load_models_and_params(
-                        num_models=num_models,
-                        use_templates=use_templates,
-                        num_recycles=num_recycles,
-                        num_ensemble=num_ensemble,
-                        model_order=model_order,
-                        model_type=model_type,
-                        data_dir=data_dir,
-                        stop_at_score=stop_at_score,
-                        rank_by=rank_by,
-                        use_dropout=use_dropout,
-                        max_seq=max_seq,
-                        max_extra_seq=max_extra_seq,
-                        use_cluster_profile=use_cluster_profile,
-                        recycle_early_stop_tolerance=recycle_early_stop_tolerance,
-                        use_fuse=use_fuse,
-                        use_bfloat16=use_bfloat16,
-                        save_all=save_all,
-                    )
-                    first_job = False
+                        cfg = config.model_config(model_name)
+                        cfg.data.eval.num_ensemble = 1
+                        params = data.get_model_haiku_params(model_name, './alphafold/data')
+                        model_runner = model.RunModel(cfg, params)
+                        processed_feature_dict = model_runner.process_feature(feature_dict, random_seed=0)
+                        prediction = model_runner.predict(processed_feature_dict, random_seed=random.randrange(sys.maxsize))
+                        representation = prediction['representations']
+                        output_dir_model = os.path.join(result_dir, f'{model_name}.npz')
+                        np.savez(output_dir_model, single=representation['single'],
+                                                    pair=representation['pair'])
+                return
+                #     model_runner_and_params = load_models_and_params(
+                #         num_models=num_models,
+                #         use_templates=use_templates,
+                #         num_recycles=num_recycles,
+                #         num_ensemble=num_ensemble,
+                #         model_order=model_order,
+                #         model_type=model_type,
+                #         data_dir=data_dir,
+                #         stop_at_score=stop_at_score,
+                #         rank_by=rank_by,
+                #         use_dropout=use_dropout,
+                #         max_seq=max_seq,
+                #         max_extra_seq=max_extra_seq,
+                #         use_cluster_profile=use_cluster_profile,
+                #         recycle_early_stop_tolerance=recycle_early_stop_tolerance,
+                #         use_fuse=use_fuse,
+                #         use_bfloat16=use_bfloat16,
+                #         save_all=save_all,
+                #     )
+                #     first_job = False
 
-                results,_ = predict_structure(
-                    prefix=jobname,
-                    result_dir=result_dir,
-                    feature_dict=feature_dict,
-                    is_complex=is_complex,
-                    use_templates=use_templates,
-                    sequences_lengths=query_sequence_len_array,
-                    pad_len=pad_len,
-                    model_type=model_type,
-                    model_runner_and_params=model_runner_and_params,
-                    num_relax=num_relax,
-                    relax_max_iterations=relax_max_iterations,
-                    relax_tolerance=relax_tolerance,
-                    relax_stiffness=relax_stiffness,
-                    relax_max_outer_iterations=relax_max_outer_iterations,
-                    rank_by=rank_by,
-                    stop_at_score=stop_at_score,
-                    prediction_callback=prediction_callback,
-                    use_gpu_relax=use_gpu_relax,
-                    random_seed=random_seed,
-                    num_seeds=num_seeds,
-                    save_all=save_all,
-                    save_single_representations=save_single_representations,
-                    save_pair_representations=save_pair_representations,
-                    save_recycles=save_recycles,
-                )
+                # results = predict_structure(
+                #     prefix=jobname,
+                #     result_dir=result_dir,
+                #     feature_dict=feature_dict,
+                #     is_complex=is_complex,
+                #     use_templates=use_templates,
+                #     sequences_lengths=query_sequence_len_array,
+                #     pad_len=pad_len,
+                #     model_type=model_type,
+                #     model_runner_and_params=model_runner_and_params,
+                #     num_relax=num_relax,
+                #     relax_max_iterations=relax_max_iterations,
+                #     relax_tolerance=relax_tolerance,
+                #     relax_stiffness=relax_stiffness,
+                #     relax_max_outer_iterations=relax_max_outer_iterations,
+                #     rank_by=rank_by,
+                #     stop_at_score=stop_at_score,
+                #     prediction_callback=prediction_callback,
+                #     use_gpu_relax=use_gpu_relax,
+                #     random_seed=random_seed,
+                #     num_seeds=num_seeds,
+                #     save_all=save_all,
+                #     save_single_representations=save_single_representations,
+                #     save_pair_representations=save_pair_representations,
+                #     save_recycles=save_recycles,
+                # )
                 print(results['representations']['single'].shape)
                 print(results['representations']['pair'].shape)
                 result_files += results["result_files"]
