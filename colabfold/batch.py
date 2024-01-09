@@ -416,12 +416,9 @@ def predict_structure(
             return_representations = save_all or save_single_representations or save_pair_representations
 
             # predict
-            result, recycles = \
-            model_runner.predict(input_features,
-                random_seed=seed,
-                return_representations=True,
-                callback=callback)
-            return result, recycles
+            result= model_runner.predict(feature_dict,
+                random_seed=seed)
+            return result
             prediction_times.append(time.time() - start)
 
             ########################
