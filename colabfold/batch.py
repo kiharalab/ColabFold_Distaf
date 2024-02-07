@@ -1562,12 +1562,11 @@ def run(
                 # pbar.set_description(f'Running {model_name}')
 
                 cfg = config.model_config(model_name)
-                if model_type_to_use == ModelType.MONOMER:
-                    cfg.data.eval.num_ensemble = 1
-                elif model_type_to_use == ModelType.MULTIMER:
+                if "multimer" in model_type:
                     cfg.model.num_ensemble_eval = 1
-
-                if model_type_to_use == ModelType.MULTIMER:
+                else:
+                    cfg.data.eval.num_ensemble = 1
+                if "multimer" in model_type:
                     cfg.model.num_recycle = multimer_model_max_num_recycles
                     cfg.model.recycle_early_stop_tolerance = 0.5
                 params = data.get_model_haiku_params(model_name, './alphafold/data')
