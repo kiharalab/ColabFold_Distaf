@@ -1567,7 +1567,7 @@ def run(
                 else:
                     cfg.data.eval.num_ensemble = 1
                 if "multimer" in model_type:
-                    cfg.model.num_recycle = multimer_model_max_num_recycles
+                    cfg.model.num_recycle = 3
                     cfg.model.recycle_early_stop_tolerance = 0.5
                 params = data.get_model_haiku_params(model_name, './alphafold/data')
                 model_runner = model.RunModel(cfg, params)
