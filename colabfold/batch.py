@@ -1586,7 +1586,7 @@ def run(
                     prediction,
                     b_factors=b_factors,
                     remove_leading_feature_dimension=(
-                        'multimer' in model_type))
+                        'multimer' not in model_type))
                 # Delete unused outputs to save memory.
                 del model_runner
                 del params
