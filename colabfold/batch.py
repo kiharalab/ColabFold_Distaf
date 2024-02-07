@@ -1552,7 +1552,10 @@ def run(
                             (50, 70, '#FFDB13'),
                             (70, 90, '#65CBF3'),
                             (90, 100, '#0053D6')]
-            model_names = config.MODEL_PRESETS['monomer']
+            if 'multimer' in model_type:
+                model_names = config.MODEL_PRESETS['multimer']
+            else:
+                model_names = config.MODEL_PRESETS['monomer']
             os.makedirs(result_dir, exist_ok=True)
             # with tqdm.notebook.tqdm(total=len(model_names), bar_format=TQDM_BAR_FORMAT) as pbar:
             for model_name in model_names:
