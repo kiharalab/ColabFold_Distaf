@@ -22,6 +22,8 @@ logger = logging.getLogger(__name__)
 def run_mmseqs(mmseqs: Path, params: List[Union[str, Path]]):
     params_log = " ".join(str(i) for i in params)
     logger.info(f"Running {mmseqs} {params_log}")
+    # hide MMseqs2 verbose paramters list that clogs up the log
+    os.environ["MMSEQS_CALL_DEPTH"] = "1"
     subprocess.check_call([mmseqs] + params)
 
 
@@ -40,6 +42,7 @@ def mmseqs_search_monomer(
     diff: int = 3000,
     qsc: float = -20.0,
     max_accept: int = 1000000,
+    prefilter_mode: int = 0,
     s: float = 8,
     db_load_mode: int = 2,
     threads: int = 32,
@@ -67,24 +70,31 @@ def mmseqs_search_monomer(
         if not dbbase.joinpath(f"{db}.dbtype").is_file():
             raise FileNotFoundError(f"Database {db} does not exist")
         if (
-            not dbbase.joinpath(f"{db}.idx").is_file()
-            and not dbbase.joinpath(f"{db}.idx.index").is_file()
+            (
+                not dbbase.joinpath(f"{db}.idx").is_file()
+                and not dbbase.joinpath(f"{db}.idx.index").is_file()
+            )
+            or os.environ.get("MMSEQS_IGNORE_INDEX", False)
         ):
             logger.info("Search does not use index")
             db_load_mode = 0
             dbSuffix1 = "_seq"
             dbSuffix2 = "_aln"
+            dbSuffix3 = ""
         else:
             dbSuffix1 = ".idx"
             dbSuffix2 = ".idx"
+            dbSuffix3 = ".idx"
 
     # fmt: off
     # @formatter:off
     search_param = ["--num-iterations", "3", "--db-load-mode", str(db_load_mode), "-a", "-e", "0.1", "--max-seqs", "10000"]
+    search_param += ["--prefilter-mode", str(prefilter_mode)]
     if s is not None:
         search_param += ["-s", "{:.1f}".format(s)]
     else:
         search_param += ["--k-score", "'seq:96,prof:80'"]
+
     filter_param = ["--filter-msa", str(filter), "--filter-min-enable", "1000", "--diff", str(diff), "--qid", "0.0,0.2,0.4,0.6,0.8,1.0", "--qsc", "0", "--max-seq-id", "0.95",]
     expand_param = ["--expansion-mode", "0", "-e", str(expand_eval), "--expand-filter-clusters", str(filter), "--max-seq-id", "0.95",]
 
@@ -105,14 +115,6 @@ def mmseqs_search_monomer(
     subprocess.run([mmseqs] + ["rmdb", base.joinpath("res")])
     subprocess.run([mmseqs] + ["rmdb", base.joinpath("res_exp_realign_filter")])
 
-    if use_templates:
-        run_mmseqs(mmseqs, ["search", base.joinpath("prof_res"), dbbase.joinpath(template_db), base.joinpath("res_pdb"),
-                            base.joinpath("tmp2"), "--db-load-mode", str(db_load_mode), "--threads", str(threads), "-s", "7.5", "-a", "-e", "0.1"])
-        run_mmseqs(mmseqs, ["convertalis", base.joinpath("prof_res"), dbbase.joinpath(f"{template_db}{dbSuffix1}"), base.joinpath("res_pdb"),
-                            base.joinpath(f"{template_db}.m8"), "--format-output",
-                            "query,target,fident,alnlen,mismatch,gapopen,qstart,qend,tstart,tend,evalue,bits,cigar",
-                            "--db-load-mode", str(db_load_mode), "--threads", str(threads)])
-        run_mmseqs(mmseqs, ["rmdb", base.joinpath("res_pdb")])
     if use_env:
         run_mmseqs(mmseqs, ["search", base.joinpath("prof_res"), dbbase.joinpath(metagenomic_db), base.joinpath("res_env"),
                             base.joinpath("tmp3"), "--threads", str(threads)] + search_param)
@@ -137,11 +139,22 @@ def mmseqs_search_monomer(
         run_mmseqs(mmseqs, ["rmdb", base.joinpath("res_env_exp")])
         run_mmseqs(mmseqs, ["rmdb", base.joinpath("res_env")])
 
-    if use_env:
         run_mmseqs(mmseqs, ["mergedbs", base.joinpath("qdb"), base.joinpath("final.a3m"), base.joinpath("uniref.a3m"), base.joinpath("bfd.mgnify30.metaeuk30.smag30.a3m")])
         run_mmseqs(mmseqs, ["rmdb", base.joinpath("bfd.mgnify30.metaeuk30.smag30.a3m")])
     else:
         run_mmseqs(mmseqs, ["mvdb", base.joinpath("uniref.a3m"), base.joinpath("final.a3m")])
+
+    if use_templates:
+        run_mmseqs(mmseqs, ["search", base.joinpath("prof_res"), dbbase.joinpath(template_db), base.joinpath("res_pdb"),
+                            base.joinpath("tmp2"), "--db-load-mode", str(db_load_mode), "--threads", str(threads), "-s", "7.5", "-a", "-e", "0.1", "--prefilter-mode", str(prefilter_mode)])
+        run_mmseqs(mmseqs, ["convertalis", base.joinpath("prof_res"), dbbase.joinpath(f"{template_db}{dbSuffix3}"), base.joinpath("res_pdb"),
+                            base.joinpath(f"{template_db}"), "--format-output",
+                            "query,target,fident,alnlen,mismatch,gapopen,qstart,qend,tstart,tend,evalue,bits,cigar",
+                            "--db-output", "1",
+                            "--db-load-mode", str(db_load_mode), "--threads", str(threads)])
+        run_mmseqs(mmseqs, ["unpackdb", base.joinpath(f"{template_db}"), base.joinpath("."), "--unpack-name-mode", "0", "--unpack-suffix", ".m8"])
+        run_mmseqs(mmseqs, ["rmdb", base.joinpath("res_pdb")])
+        run_mmseqs(mmseqs, ["rmdb", base.joinpath(f"{template_db}")])
 
     run_mmseqs(mmseqs, ["unpackdb", base.joinpath("final.a3m"), base.joinpath("."), "--unpack-name-mode", "0", "--unpack-suffix", ".a3m"])
     run_mmseqs(mmseqs, ["rmdb", base.joinpath("final.a3m")])
@@ -164,6 +177,7 @@ def mmseqs_search_pair(
     base: Path,
     uniref_db: Path = Path("uniref30_2302_db"),
     mmseqs: Path = Path("mmseqs"),
+    prefilter_mode: int = 0,
     s: float = 8,
     threads: int = 64,
     db_load_mode: int = 2,
@@ -172,8 +186,11 @@ def mmseqs_search_pair(
     if not dbbase.joinpath(f"{uniref_db}.dbtype").is_file():
         raise FileNotFoundError(f"Database {uniref_db} does not exist")
     if (
-        not dbbase.joinpath(f"{uniref_db}.idx").is_file()
-        and not dbbase.joinpath(f"{uniref_db}.idx.index").is_file()
+        (
+            not dbbase.joinpath(f"{uniref_db}.idx").is_file()
+            and not dbbase.joinpath(f"{uniref_db}.idx.index").is_file()
+        )
+        or os.environ.get("MMSEQS_IGNORE_INDEX", False)
     ):
         logger.info("Search does not use index")
         db_load_mode = 0
@@ -186,6 +203,7 @@ def mmseqs_search_pair(
     # fmt: off
     # @formatter:off
     search_param = ["--num-iterations", "3", "--db-load-mode", str(db_load_mode), "-a", "-e", "0.1", "--max-seqs", "10000",]
+    search_param += ["--prefilter-mode", str(prefilter_mode)]
     if s is not None:
         search_param += ["-s", "{:.1f}".format(s)]
     else:
@@ -229,6 +247,13 @@ def main():
         "base", type=Path, help="Directory for the results (and intermediate files)"
     )
     parser.add_argument(
+        "--prefilter-mode",
+        type=int,
+        default=0,
+        choices=[0, 1, 2],
+        help="Prefiltering algorithm to use: 0: k-mer (high-mem), 1: ungapped (high-cpu), 2: exhaustive (no prefilter, very slow). See wiki for more details: https://github.com/sokrypton/ColabFold/wiki#colabfold_search",
+    )
+    parser.add_argument(
         "-s",
         type=float,
         default=None,
@@ -236,41 +261,81 @@ def main():
     )
     # dbs are uniref, templates and environmental
     # We normally don't use templates
-    parser.add_argument("--db1", type=Path, default=Path("uniref30_2302_db"), 
-                        help="UniRef database")
-    parser.add_argument("--db2", type=Path, default=Path(""), 
-                        help="Templates database")
-    parser.add_argument("--db3", type=Path, default=Path("colabfold_envdb_202108_db"),
-                        help="Environmental database")
+    parser.add_argument(
+        "--db1", type=Path, default=Path("uniref30_2302_db"), help="UniRef database"
+    )
+    parser.add_argument("--db2", type=Path, default=Path(""), help="Templates database")
+    parser.add_argument(
+        "--db3",
+        type=Path,
+        default=Path("colabfold_envdb_202108_db"),
+        help="Environmental database",
+    )
 
     # poor man's boolean arguments
-    parser.add_argument("--use-env", type=int, default=1, choices=[0, 1],
-                        help="Use --db3")
-    parser.add_argument("--use-templates", type=int, default=0, choices=[0, 1],
-                        help="Use --db2")
-    parser.add_argument("--filter", type=int, default=1, choices=[0, 1],
-                        help="Filter the MSA by pre-defined align_eval, qsc, max_accept")
+    parser.add_argument(
+        "--use-env", type=int, default=1, choices=[0, 1], help="Use --db3"
+    )
+    parser.add_argument(
+        "--use-templates", type=int, default=0, choices=[0, 1], help="Use --db2"
+    )
+    parser.add_argument(
+        "--filter",
+        type=int,
+        default=1,
+        choices=[0, 1],
+        help="Filter the MSA by pre-defined align_eval, qsc, max_accept",
+    )
 
     # mmseqs params
-    parser.add_argument("--mmseqs", type=Path, default=Path("mmseqs"),
-                        help="Location of the mmseqs binary.")
-    parser.add_argument("--expand-eval", type=float, default=math.inf,
-                        help="e-val threshold for 'expandaln'.")
-    parser.add_argument("--align-eval", type=int, default=10,
-                        help="e-val threshold for 'align'.")
-    parser.add_argument("--diff", type=int, default=3000,
-                        help="filterresult - Keep at least this many seqs in each MSA block.")
-    parser.add_argument("--qsc", type=float, default=-20.0,
-                        help="filterresult - reduce diversity of output MSAs using min score thresh.")
-    parser.add_argument("--max-accept", type=int, default=1000000,
-                        help="align - Maximum accepted alignments before alignment calculation for a query is stopped.")
-    parser.add_argument("--pairing_strategy", type=int, default=0,
-                        help="pairaln - Pairing strategy.")
-    parser.add_argument("--db-load-mode", type=int, default=0,
-                        help="Database preload mode 0: auto, 1: fread, 2: mmap, 3: mmap+touch")
-    parser.add_argument("--threads", type=int, default=64,
-                        help="Number of threads to use.")
+    parser.add_argument(
+        "--mmseqs",
+        type=Path,
+        default=Path("mmseqs"),
+        help="Location of the mmseqs binary.",
+    )
+    parser.add_argument(
+        "--expand-eval",
+        type=float,
+        default=math.inf,
+        help="e-val threshold for 'expandaln'.",
+    )
+    parser.add_argument(
+        "--align-eval", type=int, default=10, help="e-val threshold for 'align'."
+    )
+    parser.add_argument(
+        "--diff",
+        type=int,
+        default=3000,
+        help="filterresult - Keep at least this many seqs in each MSA block.",
+    )
+    parser.add_argument(
+        "--qsc",
+        type=float,
+        default=-20.0,
+        help="filterresult - reduce diversity of output MSAs using min score thresh.",
+    )
+    parser.add_argument(
+        "--max-accept",
+        type=int,
+        default=1000000,
+        help="align - Maximum accepted alignments before alignment calculation for a query is stopped.",
+    )
+    parser.add_argument(
+        "--pairing_strategy", type=int, default=0, help="pairaln - Pairing strategy."
+    )
+    parser.add_argument(
+        "--db-load-mode",
+        type=int,
+        default=0,
+        help="Database preload mode 0: auto, 1: fread, 2: mmap, 3: mmap+touch",
+    )
+    parser.add_argument(
+        "--threads", type=int, default=64, help="Number of threads to use."
+    )
     args = parser.parse_args()
+
+    logging.basicConfig(level = logging.INFO)
 
     queries, is_complex = get_queries(args.query, None)
 
@@ -337,6 +402,7 @@ def main():
         diff=args.diff,
         qsc=args.qsc,
         max_accept=args.max_accept,
+        prefilter_mode=args.prefilter_mode,
         s=args.s,
         db_load_mode=args.db_load_mode,
         threads=args.threads,
@@ -347,6 +413,7 @@ def main():
             dbbase=args.dbbase,
             base=args.base,
             uniref_db=args.db1,
+            prefilter_mode=args.prefilter_mode,
             s=args.s,
             db_load_mode=args.db_load_mode,
             threads=args.threads,
@@ -376,16 +443,26 @@ def main():
                 unpaired_msa, paired_msa, query_sequences, query_seqs_cardinality
             )
             args.base.joinpath(f"{job_number}.a3m").write_text(msa)
-            # add raw_jobname to the output file
-            os.rename(
-                args.base.joinpath(f"{job_number}.a3m"),
-                args.base.joinpath(f"{safe_filename(raw_jobname)}.a3m"),
-            )
-            if args.use_templates:
-                os.rename(
-                    args.base.joinpath(f"{args.db2}.m8"),
-                    args.base.joinpath(f"{safe_filename(raw_jobname)}_{args.db2}.m8"),
-                )
+
+    # rename a3m files
+    for job_number, (raw_jobname, query_sequences, query_seqs_cardinality) in enumerate(queries_unique):
+        os.rename(
+            args.base.joinpath(f"{job_number}.a3m"),
+            args.base.joinpath(f"{safe_filename(raw_jobname)}.a3m"),
+        )
+
+    # rename m8 files
+    if args.use_templates:
+        id = 0
+        for raw_jobname, query_sequences, query_seqs_cardinality in queries_unique:
+            with args.base.joinpath(f"{safe_filename(raw_jobname)}_{args.db2}.m8").open(
+                "w"
+            ) as f:
+                for _ in range(len(query_seqs_cardinality)):
+                    with args.base.joinpath(f"{id}.m8").open("r") as g:
+                        f.write(g.read())
+                    os.remove(args.base.joinpath(f"{id}.m8"))
+                    id += 1
 
     query_file.unlink()
     run_mmseqs(args.mmseqs, ["rmdb", args.base.joinpath("qdb")])
